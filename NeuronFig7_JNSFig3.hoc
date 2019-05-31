@@ -1,0 +1,467 @@
+
+
+/**************************************************************
+Written by Rishikesh Narayanan. Contact: rishi.n@gmail.com
+
+Papers:
+
+Rishikesh Narayanan and Daniel Johnston, “Long-term potentiation
+in rat hippocampal neurons is accompanied by spatially widespread
+changes in intrinsic oscillatory dynamics and excitability,” Neuron,
+56(6), pp. 1061–1075, December 2007.
+
+Rishikesh Narayanan and Daniel Johnston, “The h channel mediates
+location dependence and plasticity of intrinsic phase response in
+rat hippocampal neurons,” The Journal of Neuroscience, 28(22), pp.
+5846–5860, May 2008.
+**************************************************************/
+
+
+create soma
+access soma
+
+
+objref ChirpStim, v2, v3
+
+//**************************************************************//
+// The Parameters
+//**************************************************************//
+
+tstop = 25050
+steps_per_ms = 40
+dt = 0.025
+ChirpAmp=0.05 //Chirp stimulus amplitude is 50 pA
+objref stim
+
+// --------------------------------------------------------------
+// Resistances and Capacitances
+// --------------------------------------------------------------
+
+ra     = 150			
+rm     = 30000
+c_m       = 1
+
+v_init    = -75
+celsius   = 34
+
+// --------------------------------------------------------------
+// Equilibrium potentials
+// --------------------------------------------------------------
+
+Eh=-30
+
+//--------------------------------------------------------------
+// Active conductance densities and other related parameters
+//--------------------------------------------------------------
+
+gh=6e-5
+tfactor=1
+vhalfl=-82
+
+//--------------------------------------------------------------
+// The code.
+//--------------------------------------------------------------
+
+soma {
+	L=100	
+	diam=100	
+}
+
+// Insert passive elements.
+
+insert pas
+e_pas = v_init
+Ra=ra
+cm=c_m
+g_pas=1/rm
+
+// Insert active elements.
+
+
+soma {
+	insert hd 
+
+	ghdbar_hd = gh
+	vhalfl_hd=vhalfl
+	tfactor_hd=tfactor
+	ehd_hd=Eh
+
+	finitialize(v_init)
+    fcurrent()
+
+	for (x) {
+		e_pas(x)=v(x)
+		e_pas(x)=e_pas(x)+(i_hd(x))/g_pas(x)
+	}
+}
+
+/********************************************************************/
+
+proc update_Gh() {
+	soma{
+		ghdbar_hd = gh
+		vhalfl_hd=vhalfl
+		ehd_hd=Eh
+		tfactor_hd=tfactor
+	}	
+	update_init()
+}
+
+/********************************************************************/
+
+proc update_init(){
+	finitialize(v_init)
+	fcurrent()
+	for (x) {
+		e_pas(x)=v(x)
+		e_pas(x)=e_pas(x)+(i_hd(x))/g_pas(x)
+	}
+}
+
+/********************************************************************/
+/* This function generates a Chirp current stimulus spanning 25 Hz in 25 s.
+ * The first 50 ms of the stimulus are assigned 0. This current is saved in
+ * a file named "ChirpI.txt", which is to be used for computing the
+ * resonance frequency.
+ */
+
+objref fchirp
+
+proc GenerateChirp() {
+	ChirpStim=new Vector(25050/dt)
+	ChirpStim.fill(0)
+	for i=50/dt, ChirpStim.size()-1 {
+		xval=(i-50/dt)*dt/1000
+		ChirpStim.x[i]=ChirpAmp*sin(2*3.141592654*25*(i-50/dt)/(2*(25000/dt)) *xval)
+	}
+	fchirp=new File()
+	fchirp.wopen("ChirpI.txt")
+	ChirpStim.printf(fchirp,"%f\n")
+	print "\n\nChirp Stimulus generated."
+}
+
+/********************************************************************/
+/* This function saves the model's response to the Chirp stimulus
+ * when the model is constructed with different h conductance
+ * values. The h conductance value spans 0 to 1 mS/cm2. The voltage
+ * responses are saved in a series of files in a directory named
+ * Output. Create the directory before running the simulations.
+ * These voltage traces and the current trace saved in the
+ * GenerateChirp() function are used for computing resonance and
+ * phase response properties.  
+ */
+
+objref st
+objref f1
+strdef s1
+
+proc Chirp_Gh () {
+	print "\n\nRunning h condutance sensitivity..."
+	print "\n\nFiles will be saved in the Output directory..."
+	soma st=new IClamp(0.5)
+	st.dur=tstop
+	st.del=0
+	
+	GenerateChirp()
+	ChirpStim.play(&st.amp,dt)
+	
+	v3=new Vector()
+	v3.record(&soma.v(0.5))
+	f1=new File()
+	v_init=-65
+	for(gh=0; gh<=100e-5; gh+=1e-5){
+		
+		update_Gh()
+		while (t < tstop){
+			fadvance()
+		}
+		
+		sprint(s1,"Output/ChirpGh_%4.2f.txt",gh*1e5)
+		print gh, " ", v3.size()
+		f1.wopen(s1)
+		v3.printf(f1,"%f\n")
+		f1.close()
+	}	
+}	
+
+/********************************************************************/
+/* This function saves the model's response to the Chirp stimulus
+ * when the membrane voltage is varied from -120 mV to -30 mV.
+ * The voltage responses are saved in a series of files in a directory
+ * named Output.  Create the directory before running the simulations.
+ * These voltage traces and the current trace saved in the
+ * GenerateChirp() function are used for computing resonance and
+ * phase response properties.  
+ */
+
+proc Chirp_Ih_V () {
+	print "\n\nRunning membrane voltage sensitivity..."
+	print "\n\nFiles will be saved in the Output directory..."
+	soma st=new IClamp(0.5)
+	st.dur=tstop
+	st.del=0
+	
+	GenerateChirp()
+	ChirpStim.play(&st.amp,dt)
+	
+	v3=new Vector()
+	v3.record(&soma.v(0.5))
+	f1=new File()
+
+	gh=50e-5
+	update_Gh()
+
+	for(v_init=-120; v_init<=-30; v_init+=1){
+
+		update_init()
+		
+		while (t < tstop){
+			fadvance()
+		}
+		
+		sprint(s1,"Output/ChirpV_%d.txt",v_init)
+		print v_init, " ", v3.size()
+		f1.wopen(s1)
+		v3.printf(f1,"%f\n")
+		f1.close()
+	}	
+}	
+
+/********************************************************************/
+/* This function saves the model's response to the Chirp stimulus
+ * when the membrane resistivity is varied from 1000 to 200000
+ * Ohm.cm2. The voltage responses are saved in a series of files
+ * in a directory named Output.  Create the directory before running
+ * the simulations.  These voltage traces and the current trace
+ * saved in the GenerateChirp() function are used for computing
+ * resonance and phase response properties.  
+ */
+
+proc Chirp_Ih_Rm () {
+	print "\n\nRunning membrane resitivity sensitivity..."
+	print "\n\nFiles will be saved in the Output directory..."
+	soma st=new IClamp(0.5)
+	st.dur=tstop
+	st.del=0
+	
+	GenerateChirp()
+	ChirpStim.play(&st.amp,dt)
+	
+	v3=new Vector()
+	v3.record(&soma.v(0.5))
+	f1=new File()
+
+	gh=50e-5
+	update_Gh()
+
+	for(rm=1000; rm<=200000; rm+=2000){
+
+		soma.g_pas=1/rm
+		update_init()
+
+		while (t < tstop){
+			fadvance()
+		}
+		
+		sprint(s1,"Output/ChirpRm_%d.txt",rm)
+		print rm, " ", v3.size()
+		f1.wopen(s1)
+		v3.printf(f1,"%f\n")
+		f1.close()
+	}	
+}	
+
+/********************************************************************/
+/* This function saves the model's response to the Chirp stimulus
+ * when the membrane resistivity is varied from 1000 to 200000
+ * Ohm.cm2. The voltage responses are saved in a series of files
+ * in a directory named Output.  Create the directory before running
+ * the simulations.  These voltage traces and the current trace
+ * saved in the GenerateChirp() function are used for computing
+ * resonance and phase response properties.  
+ */
+
+proc Chirp_Ih_Cm () {
+	print "\n\nRunning membrane capacitance sensitivity..."
+	print "\n\nFiles will be saved in the Output directory..."
+	soma st=new IClamp(0.5)
+	st.dur=tstop
+	st.del=0
+	
+	GenerateChirp()
+	ChirpStim.play(&st.amp,dt)
+	
+	v3=new Vector()
+	v3.record(&soma.v(0.5))
+	f1=new File()
+
+	gh=50e-5
+	update_Gh()
+
+	for(cm=0.1; cm<=3; cm+=0.1){
+
+		update_init()
+
+		while (t < tstop){
+			fadvance()
+		}
+		
+		sprint(s1,"Output/ChirpCm_%4.2f.txt",cm)
+		print cm, " ", v3.size()
+		f1.wopen(s1)
+		v3.printf(f1,"%f\n")
+		f1.close()
+	}	
+}	
+
+/********************************************************************/
+/* This function saves the model's response to the Chirp stimulus
+ * when the half maximal activation voltage of the h conductance
+ * is varied from -130 to -20 mV.  The voltage responses are saved
+ * in a series of files in a directory named Output.  Create the
+ * directory before running the simulations.  These voltage traces
+ * and the current trace saved in the GenerateChirp() function are
+ * used for computing resonance and phase response properties.  
+ */
+
+proc Chirp_Ih_vhalf () {
+	print "\n\nRunning h channel half maximal activation voltage sensitivity..."
+	print "\n\nFiles will be saved in the Output directory..."
+	soma st=new IClamp(0.5)
+	st.dur=tstop
+	st.del=0
+	
+	GenerateChirp()
+	ChirpStim.play(&st.amp,dt)
+	
+	v3=new Vector()
+	v3.record(&soma.v(0.5))
+	f1=new File()
+
+	gh=50e-5
+	update_Gh()
+
+	for(vhalfl=-130; vhalfl<=-20; vhalfl+=1){
+
+		update_Gh()
+		while (t < tstop){
+			fadvance()
+		}
+		
+		sprint(s1,"Output/ChirpVHalf_%d.txt",vhalfl)
+		print vhalfl, " ", v3.size()
+		f1.wopen(s1)
+		v3.printf(f1,"%f\n")
+		f1.close()
+	}	
+}	
+
+/********************************************************************/
+/* There are two ways by which the dependence of activation time
+ * constant is assessed. This, the default way for which the default MOD
+ * file is designed for, is one where the voltage-dependence of activation
+ * time constant is retained, while scaling the overall time constant by a
+ * factor (parameter tfactor). The second (for which the MOD file needs to
+ * be changed as per the comment there), involves setting the activation
+ * time constant to a constant value that is totally independent of
+ * voltage. This function implements the first method, whereas the next one
+ * implements the second. This function saves the model's response
+ * to the Chirp stimulus when the activation time constant's voltage
+ * dependency is retained and tfactor is varied from 1/10 to 4.
+ * The voltage responses are saved in a series of files in a directory
+ * named Output.  Create the directory before running the simulations.
+ * These voltage traces and the current trace saved in the GenerateChirp()
+ * function are used for computing resonance and phase response
+ * properties.  
+ */
+
+proc Chirp_Ih_tau () {
+	print "\n\nRunning h channel activation time constant sensitivity..."
+	print "\n\nFiles will be saved in the Output directory..."
+	soma st=new IClamp(0.5)
+	st.dur=tstop
+	st.del=0
+	
+	GenerateChirp()
+	ChirpStim.play(&st.amp,dt)
+	
+	v3=new Vector()
+	v3.record(&soma.v(0.5))
+	f1=new File()
+
+	gh=50e-5
+	update_Gh()
+
+	for(tfactor=1/10; tfactor<=4; tfactor+=1/100){
+
+		update_Gh()
+		while (t < tstop){
+			fadvance()
+		}
+		
+		sprint(s1,"Output/ChirpTFactor_%4.3f.txt",tfactor)
+		print tfactor, " ", v3.size()
+		f1.wopen(s1)
+		v3.printf(f1,"%f\n")
+		f1.close()
+	}	
+}
+
+/********************************************************************/
+/* This function saves the model's response to the Chirp stimulus
+ * when the activation time constant of the h conductance is set
+ * voltage-independent and varying from 1 to 200 ms. Alter the h.mod
+ * file before using this function. See comment in the MOD file. 
+ * The voltage responses are saved in a series of files
+ * in a directory named Output.  Create the directory before running
+ * the simulations.  These voltage traces and the current trace
+ * saved in the GenerateChirp() function are used for computing
+ * resonance and phase response properties.  
+ */
+
+proc Chirp_Ih_consttau () {
+	print "\n\nRunning h channel activation time constant sensitivity..."
+	print "\n\nFiles will be saved in the Output directory..."
+	soma st=new IClamp(0.5)
+	st.dur=tstop
+	st.del=0
+	
+	GenerateChirp()
+	ChirpStim.play(&st.amp,dt)
+	
+	v3=new Vector()
+	v3.record(&soma.v(0.5))
+	f1=new File()
+
+	gh=50e-5
+	update_Gh()
+
+	for(consttau=1; consttau<=200; consttau+=1){
+
+		soma.consttau_hd=consttau
+		update_init()
+
+		while (t < tstop){
+			fadvance()
+		}
+		
+		sprint(s1,"Output/ChirpConstTau_%d.txt",consttau)
+		print consttau, " ", v3.size()
+		f1.wopen(s1)
+		v3.printf(f1,"%f\n")
+		f1.close()
+	}	
+}	
+
+/********************************************************************/
+
+xpanel("Chirp Stimulus Responses with h Channels")
+xlabel("Select one of the simulations below")
+xbutton("Membrane voltage sensitivity", "Chirp_Ih_V()")
+xbutton("Rm sensitivity", "Chirp_Ih_Rm()")
+xbutton("Cm sensitivity", "Chirp_Ih_Cm()")
+xbutton("h conductance sensitivity", "Chirp_Gh()")
+xbutton("h activation vhalf sensitivity", "Chirp_Ih_vhalf()")
+xbutton("h activation time constant sensitivity", "Chirp_Ih_tau()")
+xpanel()
+

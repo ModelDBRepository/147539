@@ -1,0 +1,2 @@
+load_file("nrngui.hoc")
+load_file("NeuronFig7_JNSFig3.hoc")
